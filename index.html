@@ -1,0 +1,1939 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPLICE — Browser Video Editor</title>
+  <script src="coi-serviceworker.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Manrope:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ========== RESET & VARIABLES ========== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep: #09090b;
+      --bg-surface: #111114;
+      --bg-elevated: #19191e;
+      --bg-hover: #1f1f26;
+      --border: #26262e;
+      --border-bright: #383842;
+      --text: #ededf0;
+      --text-secondary: #8b8b96;
+      --text-dim: #56565e;
+      --accent: #c9952c;
+      --accent-light: #dbb04d;
+      --accent-soft: rgba(201, 149, 44, 0.12);
+      --accent-glow: rgba(201, 149, 44, 0.25);
+      --success: #3eb370;
+      --error: #dc4a4a;
+      --info: #5b8def;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 16px;
+      --radius-xl: 22px;
+      --font-display: 'Syne', sans-serif;
+      --font-body: 'Manrope', sans-serif;
+      --font-mono: 'Fira Code', monospace;
+    }
+
+    html { font-size: 15px; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-deep);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Noise texture overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      opacity: 0.025;
+      pointer-events: none;
+      z-index: 10000;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+      background-size: 200px;
+    }
+
+    /* ========== TYPOGRAPHY ========== */
+    h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; letter-spacing: -0.02em; }
+
+    /* ========== SCROLLBAR ========== */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+    /* ========== LOADING SCREEN ========== */
+    #loading-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: var(--bg-deep);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+      transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+    #loading-screen.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+
+    .loading-logo {
+      font-family: var(--font-display);
+      font-size: 2.4rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .loading-bar-track {
+      width: 200px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .loading-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-light));
+      border-radius: 2px;
+      transition: width 0.3s ease;
+    }
+    .loading-status {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      letter-spacing: 0.04em;
+    }
+
+    /* ========== MAIN LAYOUT ========== */
+    #app {
+      display: none;
+      height: 100vh;
+      grid-template-rows: auto 1fr;
+      grid-template-columns: 1fr;
+    }
+    #app.active { display: grid; }
+
+    /* ========== HEADER ========== */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.8rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-surface);
+      z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 1.2rem; }
+    .logo {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .logo-separator {
+      width: 1px;
+      height: 18px;
+      background: var(--border-bright);
+    }
+    .file-name {
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .header-right { display: flex; align-items: center; gap: 0.8rem; }
+    .header-badge {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      padding: 0.25rem 0.6rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-dim);
+      letter-spacing: 0.06em;
+    }
+
+    /* ========== MAIN CONTENT ========== */
+    .main-content {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      overflow: hidden;
+    }
+
+    /* ========== PREVIEW PANEL ========== */
+    .preview-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      position: relative;
+      background:
+        radial-gradient(ellipse at 50% 40%, rgba(201, 149, 44, 0.03) 0%, transparent 60%),
+        var(--bg-deep);
+      overflow: hidden;
+    }
+
+    /* Upload zone */
+    .upload-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 560px;
+      aspect-ratio: 16 / 10;
+      border: 2px dashed var(--border-bright);
+      border-radius: var(--radius-xl);
+      cursor: pointer;
+      transition: all 0.35s ease;
+      position: relative;
+    }
+    .upload-zone:hover,
+    .upload-zone.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .upload-zone.drag-over { transform: scale(1.01); }
+    .upload-zone.has-video { display: none; }
+
+    .upload-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+    .upload-zone:hover .upload-icon {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+    }
+    .upload-icon svg { width: 24px; height: 24px; stroke: var(--text-secondary); transition: stroke 0.3s ease; }
+    .upload-zone:hover .upload-icon svg { stroke: var(--accent); }
+
+    .upload-text {
+      text-align: center;
+    }
+    .upload-text-primary {
+      font-family: var(--font-display);
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+      color: var(--text);
+    }
+    .upload-text-secondary {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+
+    #file-input { display: none; }
+
+    /* Video container */
+    .video-container {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      width: 100%;
+      max-width: 780px;
+    }
+    .video-container.active { display: flex; }
+
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+      background: #000;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.04),
+        0 20px 60px rgba(0,0,0,0.5),
+        0 0 80px rgba(201, 149, 44, 0.04);
+    }
+    .video-wrapper video {
+      display: block;
+      width: 100%;
+      max-height: 55vh;
+      object-fit: contain;
+      background: #000;
+    }
+
+    .video-meta {
+      display: flex;
+      align-items: center;
+      gap: 1.2rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .meta-tag {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      padding: 0.3rem 0.65rem;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .meta-tag span { color: var(--text-secondary); }
+
+    .video-switch-row {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+    .switch-btn {
+      font-family: var(--font-body);
+      font-size: 0.76rem;
+      font-weight: 500;
+      padding: 0.35rem 0.85rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg-surface);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .switch-btn:hover { border-color: var(--border-bright); color: var(--text); }
+    .switch-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent-light);
+    }
+
+    /* ========== TOOLS SIDEBAR ========== */
+    .tools-sidebar {
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--bg-surface);
+      overflow: hidden;
+    }
+
+    .tools-header {
+      padding: 1rem 1.2rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .tools-title {
+      font-family: var(--font-display);
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: var(--text-dim);
+    }
+
+    .tools-nav {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 2px;
+      padding: 0.6rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tool-nav-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.3rem;
+      padding: 0.6rem 0.3rem;
+      border-radius: var(--radius-md);
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .tool-nav-btn:hover { background: var(--bg-hover); }
+    .tool-nav-btn.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+    }
+    .tool-nav-btn.disabled {
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    .tool-nav-icon {
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tool-nav-icon svg { width: 18px; height: 18px; stroke: var(--text-secondary); stroke-width: 1.8; fill: none; }
+    .tool-nav-btn.active .tool-nav-icon svg { stroke: var(--accent-light); }
+    .tool-nav-label {
+      font-size: 0.62rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+    }
+    .tool-nav-btn.active .tool-nav-label { color: var(--accent-light); }
+
+    /* Tool panels */
+    .tools-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.2rem;
+    }
+
+    .tool-panel { display: none; }
+    .tool-panel.active { display: block; animation: fadeSlideIn 0.25s ease; }
+    .tool-panel.active + .tool-panel.active {
+      margin-top: 1.2rem;
+      padding-top: 1.2rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .tool-panel-title {
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin-bottom: 0.3rem;
+    }
+    .tool-panel-desc {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      margin-bottom: 1.4rem;
+      line-height: 1.5;
+    }
+
+    /* Form elements */
+    .field {
+      margin-bottom: 1.1rem;
+    }
+    .field-label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+      margin-bottom: 0.45rem;
+    }
+    .field-row {
+      display: flex;
+      gap: 0.6rem;
+      align-items: center;
+    }
+    .field-input {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s ease;
+    }
+    .field-input:focus { border-color: var(--accent); }
+    .field-input::placeholder { color: var(--text-dim); }
+
+    .field-hint {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 0.3rem;
+    }
+
+    /* Select dropdown */
+    .field-select {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      font-family: var(--font-body);
+      font-size: 0.82rem;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2356565e' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.7rem center;
+      padding-right: 2rem;
+      transition: border-color 0.2s ease;
+    }
+    .field-select:focus { border-color: var(--accent); }
+    .field-select option { background: var(--bg-elevated); color: var(--text); }
+
+    /* Range slider */
+    .range-wrapper { position: relative; padding: 0.3rem 0; }
+    .range-value {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: var(--accent-light);
+      text-align: right;
+      min-width: 3em;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg-deep);
+      box-shadow: 0 0 8px var(--accent-glow);
+      cursor: grab;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--bg-deep);
+      box-shadow: 0 0 8px var(--accent-glow);
+      cursor: grab;
+    }
+
+    /* Radio group */
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .radio-option {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.5rem 0.7rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .radio-option:hover { border-color: var(--border-bright); background: var(--bg-hover); }
+    .radio-option.selected {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .radio-option input { display: none; }
+    .radio-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      border: 2px solid var(--border-bright);
+      transition: all 0.2s ease;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .radio-option.selected .radio-dot {
+      border-color: var(--accent);
+    }
+    .radio-option.selected .radio-dot::after {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .radio-option-text {
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+    .radio-option-hint {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-left: auto;
+      font-family: var(--font-mono);
+    }
+
+    /* Checkbox */
+    .checkbox-option {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.5rem 0;
+      cursor: pointer;
+    }
+    .checkbox-option input { display: none; }
+    .checkbox-box {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border-bright);
+      border-radius: 3px;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .checkbox-option.checked .checkbox-box {
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+    .checkbox-option.checked .checkbox-box::after {
+      content: '';
+      width: 6px;
+      height: 3px;
+      border-left: 2px solid var(--bg-deep);
+      border-bottom: 2px solid var(--bg-deep);
+      transform: rotate(-45deg) translateY(-1px);
+    }
+    .checkbox-option-text {
+      font-size: 0.82rem;
+      font-weight: 500;
+    }
+
+    /* ========== ACTION BUTTON ========== */
+    .action-area {
+      padding: 1rem 1.2rem;
+      border-top: 1px solid var(--border);
+      background: var(--bg-surface);
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+
+    .btn-process {
+      width: 100%;
+      padding: 0.75rem 1.2rem;
+      font-family: var(--font-display);
+      font-size: 0.88rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, var(--accent), var(--accent-light));
+      color: var(--bg-deep);
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn-process:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+    .btn-process:active:not(:disabled) { transform: translateY(0); }
+    .btn-process:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    .btn-process.processing {
+      pointer-events: none;
+      background: var(--bg-elevated);
+      color: var(--text-secondary);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.5rem 1rem;
+      font-family: var(--font-body);
+      font-size: 0.8rem;
+      font-weight: 600;
+      background: var(--bg-elevated);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-secondary:hover { border-color: var(--border-bright); background: var(--bg-hover); }
+
+    .btn-download {
+      width: 100%;
+      padding: 0.7rem 1rem;
+      font-family: var(--font-display);
+      font-size: 0.84rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: var(--success);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: none;
+    }
+    .btn-download.visible { display: block; }
+    .btn-download:hover { opacity: 0.9; transform: translateY(-1px); }
+
+    /* ========== PROGRESS BAR ========== */
+    .progress-area {
+      display: none;
+      padding: 0 1.2rem 0.4rem;
+    }
+    .progress-area.active { display: block; }
+    .progress-track {
+      width: 100%;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 0.4rem;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-light));
+      border-radius: 2px;
+      transition: width 0.2s ease;
+    }
+    .progress-text {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      letter-spacing: 0.02em;
+    }
+
+    /* ========== LOG CONSOLE ========== */
+    .log-toggle {
+      display: none;
+      padding: 0.3rem 1.2rem 0.8rem;
+    }
+    .log-toggle.visible { display: block; }
+    .log-toggle-btn {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 0;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .log-toggle-btn:hover { color: var(--text-secondary); }
+
+    .log-console {
+      display: none;
+      margin: 0 1.2rem 0.8rem;
+      max-height: 160px;
+      overflow-y: auto;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0.6rem;
+    }
+    .log-console.open { display: block; }
+    .log-line {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .log-line.error { color: var(--error); }
+
+    /* ========== RESULT OUTPUT ========== */
+    .result-info {
+      display: none;
+      margin-bottom: 0.8rem;
+      padding: 0.7rem;
+      background: rgba(62, 179, 112, 0.08);
+      border: 1px solid rgba(62, 179, 112, 0.2);
+      border-radius: var(--radius-sm);
+    }
+    .result-info.visible { display: block; }
+    .result-info-text {
+      font-size: 0.76rem;
+      color: var(--success);
+      font-weight: 500;
+    }
+    .result-info-detail {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      margin-top: 0.25rem;
+    }
+
+    /* ========== EMPTY STATE ========== */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      padding: 2rem;
+    }
+    .empty-state-icon {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 1rem;
+      opacity: 0.15;
+    }
+    .empty-state-icon svg { width: 100%; height: 100%; stroke: var(--text); stroke-width: 1; fill: none; }
+    .empty-state-text {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    /* ========== NEW FILE BUTTON ========== */
+    .new-file-btn {
+      display: none;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--font-body);
+      font-size: 0.76rem;
+      font-weight: 600;
+      padding: 0.4rem 0.8rem;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .new-file-btn:hover { border-color: var(--border-bright); color: var(--text); }
+    .new-file-btn.visible { display: inline-flex; }
+    .new-file-btn svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; }
+
+    /* ========== ANIMATIONS ========== */
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+
+    /* ========== RESPONSIVE ========== */
+    @media (max-width: 860px) {
+      .main-content {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+      }
+      .preview-panel { padding: 1rem; min-height: 40vh; }
+      .video-wrapper video { max-height: 35vh; }
+      .tools-sidebar { border-left: none; border-top: 1px solid var(--border); }
+    }
+    @media (max-width: 500px) {
+      .tools-nav { grid-template-columns: repeat(4, 1fr); gap: 1px; }
+      .tool-nav-label { display: none; }
+      .header { padding: 0.6rem 1rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Loading Screen -->
+  <div id="loading-screen">
+    <div class="loading-logo">SPLICE</div>
+    <div class="loading-bar-track">
+      <div class="loading-bar-fill" id="load-bar"></div>
+    </div>
+    <div class="loading-status" id="load-status">Initializing engine...</div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">SPLICE</div>
+        <div class="logo-separator"></div>
+        <div class="file-name" id="file-name-display">No file loaded</div>
+        <button class="new-file-btn" id="new-file-btn" title="Load new file">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          New
+        </button>
+      </div>
+      <div class="header-right">
+        <span class="header-badge" id="file-size-badge" style="display:none"></span>
+        <span class="header-badge">ffmpeg-wasm</span>
+      </div>
+    </header>
+
+    <!-- Content -->
+    <div class="main-content">
+      <!-- Preview Panel -->
+      <div class="preview-panel">
+        <div class="upload-zone" id="upload-zone">
+          <input type="file" id="file-input" accept="video/*,audio/*">
+          <div class="upload-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="17 8 12 3 7 8"/>
+              <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+          </div>
+          <div class="upload-text">
+            <div class="upload-text-primary">Drop a video file here</div>
+            <div class="upload-text-secondary">or click to browse &mdash; MP4, WebM, AVI, MOV, MKV</div>
+          </div>
+        </div>
+
+        <div class="video-container" id="video-container">
+          <div class="video-switch-row">
+            <button class="switch-btn active" id="switch-input">Original</button>
+            <button class="switch-btn" id="switch-output">Output</button>
+          </div>
+          <div class="video-wrapper">
+            <video id="video-player" controls></video>
+          </div>
+          <div class="video-meta" id="video-meta"></div>
+        </div>
+      </div>
+
+      <!-- Tools Sidebar -->
+      <aside class="tools-sidebar">
+        <div class="tools-header">
+          <div class="tools-title">Tools</div>
+        </div>
+
+        <nav class="tools-nav" id="tools-nav">
+          <!-- Trim -->
+          <button class="tool-nav-btn" data-tool="trim">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg></div>
+            <span class="tool-nav-label">Trim</span>
+          </button>
+          <!-- Mute -->
+          <button class="tool-nav-btn" data-tool="mute">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg></div>
+            <span class="tool-nav-label">Mute</span>
+          </button>
+          <!-- Resize -->
+          <button class="tool-nav-btn" data-tool="resize">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></div>
+            <span class="tool-nav-label">Resize</span>
+          </button>
+          <!-- Convert -->
+          <button class="tool-nav-btn" data-tool="convert">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></div>
+            <span class="tool-nav-label">Convert</span>
+          </button>
+          <!-- Speed -->
+          <button class="tool-nav-btn" data-tool="speed">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <span class="tool-nav-label">Speed</span>
+          </button>
+          <!-- Extract Audio -->
+          <button class="tool-nav-btn" data-tool="audio">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+            <span class="tool-nav-label">Audio</span>
+          </button>
+          <!-- Rotate -->
+          <button class="tool-nav-btn" data-tool="rotate">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></div>
+            <span class="tool-nav-label">Rotate</span>
+          </button>
+          <!-- Compress -->
+          <button class="tool-nav-btn" data-tool="compress">
+            <div class="tool-nav-icon"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg></div>
+            <span class="tool-nav-label">Shrink</span>
+          </button>
+        </nav>
+
+        <div class="tools-body" id="tools-body">
+          <!-- Empty state (before file upload) -->
+          <div class="empty-state" id="tools-empty">
+            <div class="empty-state-icon">
+              <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"/>
+                <line x1="7" y1="2" x2="7" y2="22"/>
+                <line x1="17" y1="2" x2="17" y2="22"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <line x1="2" y1="7" x2="7" y2="7"/>
+                <line x1="2" y1="17" x2="7" y2="17"/>
+                <line x1="17" y1="7" x2="22" y2="7"/>
+                <line x1="17" y1="17" x2="22" y2="17"/>
+              </svg>
+            </div>
+            <div class="empty-state-text">Upload a video to start editing</div>
+          </div>
+
+          <!-- TRIM -->
+          <div class="tool-panel" id="panel-trim">
+            <div class="tool-panel-title">Trim Video</div>
+            <div class="tool-panel-desc">Cut your video to a specific time range.</div>
+            <div class="field">
+              <label class="field-label">Start Time</label>
+              <input type="text" class="field-input" id="trim-start" placeholder="0:00.00" value="0:00.00">
+            </div>
+            <div class="field">
+              <label class="field-label">End Time</label>
+              <input type="text" class="field-input" id="trim-end" placeholder="0:00.00">
+            </div>
+            <div class="field">
+              <label class="checkbox-option" id="trim-precise-label">
+                <input type="checkbox" id="trim-precise">
+                <div class="checkbox-box"></div>
+                <span class="checkbox-option-text">Precise cut (re-encode)</span>
+              </label>
+              <div class="field-hint">Fast mode uses stream copy. Precise mode re-encodes for frame-accurate cuts.</div>
+            </div>
+          </div>
+
+          <!-- MUTE -->
+          <div class="tool-panel" id="panel-mute">
+            <div class="tool-panel-title">Remove Audio</div>
+            <div class="tool-panel-desc">Strip the audio track from your video. Fast stream-copy operation.</div>
+            <div class="result-info" id="mute-info" style="display: block; background: var(--accent-soft); border-color: rgba(201,149,44,0.2);">
+              <div class="result-info-text" style="color: var(--accent-light);">One-click operation</div>
+              <div class="result-info-detail">Click the button below to remove all audio. Video quality is preserved.</div>
+            </div>
+          </div>
+
+          <!-- RESIZE -->
+          <div class="tool-panel" id="panel-resize">
+            <div class="tool-panel-title">Resize Video</div>
+            <div class="tool-panel-desc">Change the resolution of your video.</div>
+            <div class="field">
+              <label class="field-label">Preset</label>
+              <div class="radio-group" id="resize-presets">
+                <label class="radio-option" data-value="3840:-2">
+                  <input type="radio" name="resize" value="3840:-2">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">4K UHD</span>
+                  <span class="radio-option-hint">3840px</span>
+                </label>
+                <label class="radio-option selected" data-value="1920:-2">
+                  <input type="radio" name="resize" value="1920:-2" checked>
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">1080p Full HD</span>
+                  <span class="radio-option-hint">1920px</span>
+                </label>
+                <label class="radio-option" data-value="1280:-2">
+                  <input type="radio" name="resize" value="1280:-2">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">720p HD</span>
+                  <span class="radio-option-hint">1280px</span>
+                </label>
+                <label class="radio-option" data-value="854:-2">
+                  <input type="radio" name="resize" value="854:-2">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">480p SD</span>
+                  <span class="radio-option-hint">854px</span>
+                </label>
+                <label class="radio-option" data-value="640:-2">
+                  <input type="radio" name="resize" value="640:-2">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">360p</span>
+                  <span class="radio-option-hint">640px</span>
+                </label>
+                <label class="radio-option" data-value="custom">
+                  <input type="radio" name="resize" value="custom">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Custom</span>
+                </label>
+              </div>
+            </div>
+            <div class="field" id="resize-custom-fields" style="display: none;">
+              <label class="field-label">Custom Size</label>
+              <div class="field-row">
+                <input type="number" class="field-input" id="resize-w" placeholder="Width" style="width:50%">
+                <span style="color: var(--text-dim); font-size: 0.82rem;">&times;</span>
+                <input type="number" class="field-input" id="resize-h" placeholder="Height" style="width:50%">
+              </div>
+              <div class="field-hint">Use -2 for auto-calculate with aspect ratio.</div>
+            </div>
+          </div>
+
+          <!-- CONVERT -->
+          <div class="tool-panel" id="panel-convert">
+            <div class="tool-panel-title">Convert Format</div>
+            <div class="tool-panel-desc">Convert your video to a different container format.</div>
+            <div class="field">
+              <label class="field-label">Output Format</label>
+              <div class="radio-group" id="convert-format">
+                <label class="radio-option selected" data-value="mp4">
+                  <input type="radio" name="convert" value="mp4" checked>
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">MP4</span>
+                  <span class="radio-option-hint">H.264 + AAC</span>
+                </label>
+                <label class="radio-option" data-value="webm">
+                  <input type="radio" name="convert" value="webm">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">WebM</span>
+                  <span class="radio-option-hint">VP8 + Vorbis</span>
+                </label>
+                <label class="radio-option" data-value="avi">
+                  <input type="radio" name="convert" value="avi">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">AVI</span>
+                  <span class="radio-option-hint">Classic format</span>
+                </label>
+                <label class="radio-option" data-value="mov">
+                  <input type="radio" name="convert" value="mov">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">MOV</span>
+                  <span class="radio-option-hint">Apple QuickTime</span>
+                </label>
+                <label class="radio-option" data-value="mkv">
+                  <input type="radio" name="convert" value="mkv">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">MKV</span>
+                  <span class="radio-option-hint">Matroska</span>
+                </label>
+                <label class="radio-option" data-value="gif">
+                  <input type="radio" name="convert" value="gif">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">GIF</span>
+                  <span class="radio-option-hint">Animated image</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- SPEED -->
+          <div class="tool-panel" id="panel-speed">
+            <div class="tool-panel-title">Change Speed</div>
+            <div class="tool-panel-desc">Speed up or slow down your video.</div>
+            <div class="field">
+              <label class="field-label">Playback Speed</label>
+              <div class="field-row">
+                <input type="range" id="speed-slider" min="0.25" max="4" step="0.25" value="1">
+                <div class="range-value" id="speed-value">1&times;</div>
+              </div>
+            </div>
+            <div class="field">
+              <label class="checkbox-option" id="speed-audio-label">
+                <input type="checkbox" id="speed-audio" checked>
+                <div class="checkbox-box"></div>
+                <span class="checkbox-option-text">Adjust audio speed too</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- AUDIO EXTRACT -->
+          <div class="tool-panel" id="panel-audio">
+            <div class="tool-panel-title">Extract Audio</div>
+            <div class="tool-panel-desc">Pull the audio track from your video.</div>
+            <div class="field">
+              <label class="field-label">Output Format</label>
+              <div class="radio-group" id="audio-format">
+                <label class="radio-option selected" data-value="mp3">
+                  <input type="radio" name="audioformat" value="mp3" checked>
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">MP3</span>
+                  <span class="radio-option-hint">Universal</span>
+                </label>
+                <label class="radio-option" data-value="wav">
+                  <input type="radio" name="audioformat" value="wav">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">WAV</span>
+                  <span class="radio-option-hint">Lossless</span>
+                </label>
+                <label class="radio-option" data-value="aac">
+                  <input type="radio" name="audioformat" value="aac">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">AAC</span>
+                  <span class="radio-option-hint">High quality</span>
+                </label>
+                <label class="radio-option" data-value="ogg">
+                  <input type="radio" name="audioformat" value="ogg">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">OGG</span>
+                  <span class="radio-option-hint">Open format</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- ROTATE -->
+          <div class="tool-panel" id="panel-rotate">
+            <div class="tool-panel-title">Rotate &amp; Flip</div>
+            <div class="tool-panel-desc">Rotate or flip your video orientation.</div>
+            <div class="field">
+              <label class="field-label">Transform</label>
+              <div class="radio-group" id="rotate-options">
+                <label class="radio-option selected" data-value="cw90">
+                  <input type="radio" name="rotate" value="cw90" checked>
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Rotate 90&deg; CW</span>
+                </label>
+                <label class="radio-option" data-value="ccw90">
+                  <input type="radio" name="rotate" value="ccw90">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Rotate 90&deg; CCW</span>
+                </label>
+                <label class="radio-option" data-value="180">
+                  <input type="radio" name="rotate" value="180">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Rotate 180&deg;</span>
+                </label>
+                <label class="radio-option" data-value="hflip">
+                  <input type="radio" name="rotate" value="hflip">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Flip Horizontal</span>
+                </label>
+                <label class="radio-option" data-value="vflip">
+                  <input type="radio" name="rotate" value="vflip">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Flip Vertical</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- COMPRESS -->
+          <div class="tool-panel" id="panel-compress">
+            <div class="tool-panel-title">Compress Video</div>
+            <div class="tool-panel-desc">Reduce file size by adjusting quality.</div>
+            <div class="field">
+              <label class="field-label">Quality Preset</label>
+              <div class="radio-group" id="compress-quality">
+                <label class="radio-option" data-value="18">
+                  <input type="radio" name="compress" value="18">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">High Quality</span>
+                  <span class="radio-option-hint">CRF 18</span>
+                </label>
+                <label class="radio-option selected" data-value="23">
+                  <input type="radio" name="compress" value="23" checked>
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Balanced</span>
+                  <span class="radio-option-hint">CRF 23</span>
+                </label>
+                <label class="radio-option" data-value="28">
+                  <input type="radio" name="compress" value="28">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Smaller File</span>
+                  <span class="radio-option-hint">CRF 28</span>
+                </label>
+                <label class="radio-option" data-value="35">
+                  <input type="radio" name="compress" value="35">
+                  <div class="radio-dot"></div>
+                  <span class="radio-option-text">Minimum Size</span>
+                  <span class="radio-option-hint">CRF 35</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Log toggle -->
+        <div class="log-toggle" id="log-toggle">
+          <button class="log-toggle-btn" id="log-toggle-btn">Show console log</button>
+        </div>
+        <div class="log-console" id="log-console"></div>
+
+        <!-- Result info -->
+        <div style="padding: 0 1.2rem;">
+          <div class="result-info" id="result-info">
+            <div class="result-info-text" id="result-text"></div>
+            <div class="result-info-detail" id="result-detail"></div>
+          </div>
+        </div>
+
+        <!-- Progress -->
+        <div class="progress-area" id="progress-area">
+          <div class="progress-track">
+            <div class="progress-fill" id="progress-fill"></div>
+          </div>
+          <div class="progress-text" id="progress-text">Ready</div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="action-area">
+          <button class="btn-process" id="btn-process" disabled>Process</button>
+          <button class="btn-download" id="btn-download">Download Result</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script type="module">
+    // ==========================================
+    //  SPLICE — Browser Video Editor
+    //  Powered by ffmpeg-wasm
+    // ==========================================
+
+    import { FFmpeg } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
+    import { fetchFile, toBlobURL } from 'https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js';
+
+    // ----- State -----
+    const state = {
+      ffmpeg: null,
+      loaded: false,
+      processing: false,
+      inputFile: null,
+      inputName: '',
+      inputExt: '',
+      videoDuration: 0,
+      videoWidth: 0,
+      videoHeight: 0,
+      activeTools: new Set(),
+      outputBlob: null,
+      outputName: '',
+      showingOutput: false,
+    };
+
+    // ----- DOM refs -----
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    const dom = {
+      loadingScreen: $('#loading-screen'),
+      loadBar: $('#load-bar'),
+      loadStatus: $('#load-status'),
+      app: $('#app'),
+      fileInput: $('#file-input'),
+      uploadZone: $('#upload-zone'),
+      videoContainer: $('#video-container'),
+      videoPlayer: $('#video-player'),
+      videoMeta: $('#video-meta'),
+      fileNameDisplay: $('#file-name-display'),
+      fileSizeBadge: $('#file-size-badge'),
+      newFileBtn: $('#new-file-btn'),
+      toolsNav: $('#tools-nav'),
+      toolsBody: $('#tools-body'),
+      toolsEmpty: $('#tools-empty'),
+      btnProcess: $('#btn-process'),
+      btnDownload: $('#btn-download'),
+      progressArea: $('#progress-area'),
+      progressFill: $('#progress-fill'),
+      progressText: $('#progress-text'),
+      logToggle: $('#log-toggle'),
+      logToggleBtn: $('#log-toggle-btn'),
+      logConsole: $('#log-console'),
+      resultInfo: $('#result-info'),
+      resultText: $('#result-text'),
+      resultDetail: $('#result-detail'),
+      switchInput: $('#switch-input'),
+      switchOutput: $('#switch-output'),
+    };
+
+    // ----- Initialize FFmpeg -----
+    async function initFFmpeg() {
+      const ffmpeg = new FFmpeg();
+      state.ffmpeg = ffmpeg;
+
+      ffmpeg.on('log', ({ message }) => {
+        appendLog(message);
+      });
+
+      ffmpeg.on('progress', ({ progress }) => {
+        const pct = Math.max(0, Math.min(100, Math.round(progress * 100)));
+        setProgress(pct, `Processing... ${pct}%`);
+      });
+
+      dom.loadStatus.textContent = 'Downloading ffmpeg core...';
+      dom.loadBar.style.width = '10%';
+
+      try {
+        const coreBase = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+        const ffmpegBase = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm';
+
+        const coreURL = await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript');
+        dom.loadBar.style.width = '30%';
+        dom.loadStatus.textContent = 'Downloading WASM binary...';
+
+        const wasmURL = await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm');
+        dom.loadBar.style.width = '55%';
+        dom.loadStatus.textContent = 'Building worker...';
+
+        // Fetch the ESM worker source and its dependencies, then rewrite
+        // relative imports to absolute URLs so the blob Worker can resolve them.
+        const [workerSrc, constSrc, errorsSrc] = await Promise.all([
+          fetch(`${ffmpegBase}/worker.js`).then(r => r.text()),
+          fetch(`${ffmpegBase}/const.js`).then(r => r.text()),
+          fetch(`${ffmpegBase}/errors.js`).then(r => r.text()),
+        ]);
+        dom.loadBar.style.width = '75%';
+
+        // Strip import/export statements and combine into one self-contained script
+        const constCode = constSrc
+          .replace(/^export\s+/gm, '')
+          .replace(/^import\s+.*$/gm, '');
+        const errorsCode = errorsSrc
+          .replace(/^export\s+/gm, '')
+          .replace(/^import\s+.*$/gm, '');
+        const workerCode = workerSrc
+          .replace(/^import\s+\{[^}]+\}\s+from\s+["']\.\/const\.js["'];?\s*$/gm, '')
+          .replace(/^import\s+\{[^}]+\}\s+from\s+["']\.\/errors\.js["'];?\s*$/gm, '')
+          .replace(/^\/\/\/\s*<reference.*$/gm, '');
+
+        const bundledWorker = `// --- const.js ---\n${constCode}\n// --- errors.js ---\n${errorsCode}\n// --- worker.js ---\n${workerCode}`;
+        const classWorkerURL = URL.createObjectURL(
+          new Blob([bundledWorker], { type: 'text/javascript' })
+        );
+
+        dom.loadBar.style.width = '85%';
+        dom.loadStatus.textContent = 'Loading engine...';
+
+        await ffmpeg.load({ coreURL, wasmURL, classWorkerURL });
+
+        dom.loadBar.style.width = '100%';
+        dom.loadStatus.textContent = 'Ready';
+        state.loaded = true;
+
+        setTimeout(() => {
+          dom.loadingScreen.classList.add('hidden');
+          dom.app.classList.add('active');
+        }, 400);
+      } catch (err) {
+        dom.loadStatus.textContent = `Error: ${err.message}`;
+        dom.loadBar.style.background = 'var(--error)';
+        dom.loadBar.style.width = '100%';
+        console.error('FFmpeg load failed:', err);
+      }
+    }
+
+    // ----- File Upload -----
+    function setupUpload() {
+      dom.uploadZone.addEventListener('click', () => dom.fileInput.click());
+      dom.fileInput.addEventListener('change', (e) => {
+        if (e.target.files.length) handleFile(e.target.files[0]);
+      });
+      dom.uploadZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dom.uploadZone.classList.add('drag-over');
+      });
+      dom.uploadZone.addEventListener('dragleave', () => {
+        dom.uploadZone.classList.remove('drag-over');
+      });
+      dom.uploadZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dom.uploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+      });
+      dom.newFileBtn.addEventListener('click', () => {
+        dom.fileInput.value = '';
+        dom.fileInput.click();
+      });
+    }
+
+    async function handleFile(file) {
+      state.inputFile = file;
+      state.inputName = file.name;
+      state.inputExt = file.name.split('.').pop().toLowerCase();
+      state.outputBlob = null;
+      state.showingOutput = false;
+
+      // Update header
+      dom.fileNameDisplay.textContent = file.name;
+      dom.fileSizeBadge.style.display = 'inline';
+      dom.fileSizeBadge.textContent = formatBytes(file.size);
+      dom.newFileBtn.classList.add('visible');
+
+      // Show video
+      const url = URL.createObjectURL(file);
+      dom.videoPlayer.src = url;
+      dom.uploadZone.classList.add('has-video');
+      dom.videoContainer.classList.add('active');
+      dom.toolsEmpty.style.display = 'none';
+      dom.switchInput.classList.add('active');
+      dom.switchOutput.classList.remove('active');
+
+      // Show active tool panels
+      showActiveToolPanels();
+
+      // Wait for metadata
+      dom.videoPlayer.onloadedmetadata = () => {
+        state.videoDuration = dom.videoPlayer.duration;
+        state.videoWidth = dom.videoPlayer.videoWidth;
+        state.videoHeight = dom.videoPlayer.videoHeight;
+
+        // Set trim end
+        $('#trim-end').value = formatTime(state.videoDuration);
+
+        // Update meta display
+        const meta = [];
+        if (state.videoWidth && state.videoHeight) {
+          meta.push(`<div class="meta-tag"><span>${state.videoWidth}&times;${state.videoHeight}</span></div>`);
+        }
+        meta.push(`<div class="meta-tag"><span>${formatTime(state.videoDuration)}</span></div>`);
+        meta.push(`<div class="meta-tag"><span>${formatBytes(file.size)}</span></div>`);
+        meta.push(`<div class="meta-tag"><span>${state.inputExt.toUpperCase()}</span></div>`);
+        dom.videoMeta.innerHTML = meta.join('');
+
+        updateProcessBtn();
+      };
+
+      // Reset UI
+      hideResult();
+      dom.btnDownload.classList.remove('visible');
+    }
+
+    // ----- Tool Navigation (multi-select) -----
+    function setupToolNav() {
+      dom.toolsNav.querySelectorAll('.tool-nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tool = btn.dataset.tool;
+          if (state.activeTools.has(tool)) {
+            state.activeTools.delete(tool);
+            btn.classList.remove('active');
+          } else {
+            // Extract audio is exclusive — can't combine with video ops
+            if (tool === 'audio') {
+              state.activeTools.clear();
+              dom.toolsNav.querySelectorAll('.tool-nav-btn').forEach(b => b.classList.remove('active'));
+            } else if (state.activeTools.has('audio')) {
+              state.activeTools.delete('audio');
+              dom.toolsNav.querySelector('[data-tool="audio"]').classList.remove('active');
+            }
+            state.activeTools.add(tool);
+            btn.classList.add('active');
+          }
+          if (state.inputFile) showActiveToolPanels();
+          updateProcessBtn();
+        });
+      });
+    }
+
+    function updateProcessBtn() {
+      const n = state.activeTools.size;
+      dom.btnProcess.disabled = !state.inputFile || n === 0;
+      dom.btnProcess.textContent = n > 1 ? `Process (${n} tools)` : 'Process';
+    }
+
+    function showActiveToolPanels() {
+      $$('.tool-panel').forEach(p => p.classList.remove('active'));
+      if (state.activeTools.size === 0) {
+        dom.toolsEmpty.style.display = state.inputFile ? 'none' : '';
+        return;
+      }
+      for (const tool of state.activeTools) {
+        const panel = $(`#panel-${tool}`);
+        if (panel) panel.classList.add('active');
+      }
+    }
+
+    // ----- Radio Groups -----
+    function setupRadioGroups() {
+      document.querySelectorAll('.radio-group').forEach(group => {
+        group.querySelectorAll('.radio-option').forEach(option => {
+          option.addEventListener('click', () => {
+            group.querySelectorAll('.radio-option').forEach(o => o.classList.remove('selected'));
+            option.classList.add('selected');
+            option.querySelector('input').checked = true;
+
+            // Custom resize toggle
+            if (group.id === 'resize-presets') {
+              const val = option.dataset.value;
+              $('#resize-custom-fields').style.display = val === 'custom' ? 'block' : 'none';
+            }
+          });
+        });
+      });
+    }
+
+    // ----- Checkbox -----
+    function setupCheckboxes() {
+      document.querySelectorAll('.checkbox-option').forEach(label => {
+        const cb = label.querySelector('input[type="checkbox"]');
+        if (cb.checked) label.classList.add('checked');
+        label.addEventListener('click', (e) => {
+          e.preventDefault();
+          cb.checked = !cb.checked;
+          label.classList.toggle('checked', cb.checked);
+        });
+      });
+    }
+
+    // ----- Speed Slider -----
+    function setupSpeedSlider() {
+      const slider = $('#speed-slider');
+      const display = $('#speed-value');
+      slider.addEventListener('input', () => {
+        display.innerHTML = `${slider.value}&times;`;
+      });
+    }
+
+    // ----- Video Switch -----
+    function setupVideoSwitch() {
+      dom.switchInput.addEventListener('click', () => {
+        if (!state.inputFile) return;
+        state.showingOutput = false;
+        dom.switchInput.classList.add('active');
+        dom.switchOutput.classList.remove('active');
+        dom.videoPlayer.src = URL.createObjectURL(state.inputFile);
+      });
+      dom.switchOutput.addEventListener('click', () => {
+        if (!state.outputBlob) return;
+        state.showingOutput = true;
+        dom.switchOutput.classList.add('active');
+        dom.switchInput.classList.remove('active');
+        dom.videoPlayer.src = URL.createObjectURL(state.outputBlob);
+      });
+    }
+
+    // ----- Log Console -----
+    function setupLog() {
+      dom.logToggleBtn.addEventListener('click', () => {
+        const open = dom.logConsole.classList.toggle('open');
+        dom.logToggleBtn.textContent = open ? 'Hide console log' : 'Show console log';
+      });
+    }
+
+    function appendLog(msg) {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = msg;
+      dom.logConsole.appendChild(line);
+      dom.logConsole.scrollTop = dom.logConsole.scrollHeight;
+    }
+
+    // ----- Progress -----
+    function setProgress(pct, text) {
+      dom.progressArea.classList.add('active');
+      dom.progressFill.style.width = `${pct}%`;
+      if (text) dom.progressText.textContent = text;
+    }
+
+    function hideProgress() {
+      dom.progressArea.classList.remove('active');
+      dom.progressFill.style.width = '0%';
+    }
+
+    // ----- Result -----
+    function showResult(text, detail) {
+      dom.resultInfo.classList.add('visible');
+      dom.resultText.textContent = text;
+      dom.resultDetail.textContent = detail || '';
+    }
+
+    function hideResult() {
+      dom.resultInfo.classList.remove('visible');
+    }
+
+    // ----- Process (multi-tool) -----
+    async function processVideo() {
+      if (!state.inputFile || !state.loaded || state.processing) return;
+      const tools = state.activeTools;
+      if (tools.size === 0) return;
+
+      state.processing = true;
+      dom.btnProcess.disabled = true;
+      dom.btnProcess.classList.add('processing');
+      dom.btnProcess.textContent = 'Processing...';
+      dom.btnDownload.classList.remove('visible');
+      dom.logConsole.innerHTML = '';
+      dom.logToggle.classList.add('visible');
+      hideResult();
+      setProgress(0, 'Starting...');
+
+      const ffmpeg = state.ffmpeg;
+      const inputName = `input.${state.inputExt}`;
+
+      try {
+        setProgress(5, 'Loading file into memory...');
+        await ffmpeg.writeFile(inputName, await fetchFile(state.inputFile));
+
+        // --- Build combined ffmpeg command ---
+        const args = ['-i', inputName];
+        const videoFilters = [];
+        const audioFilters = [];
+        let dropAudio = false;
+        let dropVideo = false;
+        let outputExt = state.inputExt;
+        let outputLabel = [...tools].join('+');
+        let needsReencode = false;
+        let codecArgs = [];
+        let trimArgs = [];
+        let extraInputArgs = [];
+
+        // Trim — must come before -i for fast seek
+        if (tools.has('trim')) {
+          const start = $('#trim-start').value || '0:00.00';
+          const end = $('#trim-end').value || formatTime(state.videoDuration);
+          trimArgs = ['-ss', toFFmpegTime(start), '-to', toFFmpegTime(end)];
+          // Any filter or re-encode means precise trim
+          if (tools.size > 1 || $('#trim-precise').checked) {
+            needsReencode = true;
+          }
+        }
+
+        // Mute
+        if (tools.has('mute')) {
+          dropAudio = true;
+        }
+
+        // Resize
+        if (tools.has('resize')) {
+          const selected = document.querySelector('#resize-presets .radio-option.selected');
+          let scale = selected?.dataset.value || '1280:-2';
+          if (scale === 'custom') {
+            const w = $('#resize-w').value || '-2';
+            const h = $('#resize-h').value || '-2';
+            scale = `${w}:${h}`;
+          }
+          videoFilters.push(`scale=${scale}`);
+          needsReencode = true;
+        }
+
+        // Speed
+        if (tools.has('speed')) {
+          const speed = parseFloat($('#speed-slider').value);
+          if (speed !== 1) {
+            const ptsFactor = (1 / speed).toFixed(4);
+            videoFilters.push(`setpts=${ptsFactor}*PTS`);
+            needsReencode = true;
+            if ($('#speed-audio').checked && !dropAudio) {
+              audioFilters.push(buildAtempoChain(speed));
+            } else if (!$('#speed-audio').checked) {
+              dropAudio = true;
+            }
+          }
+        }
+
+        // Rotate
+        if (tools.has('rotate')) {
+          const rot = document.querySelector('#rotate-options .radio-option.selected')?.dataset.value || 'cw90';
+          const filterMap = {
+            'cw90': 'transpose=1', 'ccw90': 'transpose=2',
+            '180': 'transpose=1,transpose=1', 'hflip': 'hflip', 'vflip': 'vflip',
+          };
+          videoFilters.push(filterMap[rot]);
+          needsReencode = true;
+        }
+
+        // Convert format
+        if (tools.has('convert')) {
+          const format = document.querySelector('#convert-format .radio-option.selected')?.dataset.value || 'mp4';
+          outputExt = format;
+          if (format === 'gif') {
+            videoFilters.push('fps=12');
+            if (!tools.has('resize')) videoFilters.push('scale=480:-1:flags=lanczos');
+            dropAudio = true;
+            needsReencode = true;
+          } else if (format === 'webm') {
+            codecArgs.push('-c:v', 'libvpx', '-b:v', '1M');
+            if (!dropAudio) codecArgs.push('-c:a', 'libvorbis');
+            needsReencode = true;
+          }
+        }
+
+        // Compress
+        if (tools.has('compress')) {
+          const crf = document.querySelector('#compress-quality .radio-option.selected')?.dataset.value || '23';
+          codecArgs.push('-c:v', 'libx264', '-crf', crf, '-preset', 'medium');
+          if (!dropAudio && !codecArgs.includes('-c:a')) codecArgs.push('-c:a', 'aac', '-b:a', '128k');
+          needsReencode = true;
+        }
+
+        // Extract audio (exclusive)
+        if (tools.has('audio')) {
+          const audioFmt = document.querySelector('#audio-format .radio-option.selected')?.dataset.value || 'mp3';
+          outputExt = audioFmt;
+          dropVideo = true;
+          const codecMap = {
+            mp3: ['-acodec', 'libmp3lame', '-q:a', '2'],
+            wav: ['-acodec', 'pcm_s16le'],
+            aac: ['-acodec', 'aac', '-b:a', '192k'],
+            ogg: ['-acodec', 'libvorbis'],
+          };
+          codecArgs = codecMap[audioFmt] || codecMap.mp3;
+        }
+
+        // --- Assemble final args ---
+        const finalArgs = [];
+
+        // Trim before input for fast seek, or after for precise
+        if (trimArgs.length && !needsReencode) {
+          finalArgs.push(...trimArgs, '-i', inputName, '-c', 'copy');
+        } else if (trimArgs.length) {
+          finalArgs.push('-i', inputName, ...trimArgs);
+        } else {
+          finalArgs.push('-i', inputName);
+        }
+
+        if (dropVideo) finalArgs.push('-vn');
+        if (dropAudio) finalArgs.push('-an');
+
+        if (videoFilters.length > 0) {
+          finalArgs.push('-vf', videoFilters.join(','));
+        }
+        if (audioFilters.length > 0) {
+          finalArgs.push('-af', audioFilters.join(','));
+        }
+
+        if (codecArgs.length > 0) {
+          finalArgs.push(...codecArgs);
+        } else if (!needsReencode && !dropVideo && !dropAudio && trimArgs.length === 0) {
+          // Stream copy when nothing requires re-encode
+          finalArgs.push('-c', 'copy');
+        }
+
+        const outputName = `output.${outputExt}`;
+        if (outputExt === 'gif') finalArgs.push('-f', 'gif');
+        finalArgs.push(outputName);
+
+        appendLog(`> ffmpeg ${finalArgs.join(' ')}`);
+        setProgress(10, 'Processing with ffmpeg...');
+        await ffmpeg.exec(finalArgs);
+
+        // Read output
+        setProgress(90, 'Reading output...');
+        const data = await ffmpeg.readFile(outputName);
+        const mimeMap = {
+          mp4: 'video/mp4', webm: 'video/webm', avi: 'video/avi', mov: 'video/quicktime', mkv: 'video/x-matroska',
+          gif: 'image/gif', mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac', ogg: 'audio/ogg',
+        };
+        const ext = outputName.split('.').pop();
+        const mime = mimeMap[ext] || 'application/octet-stream';
+        state.outputBlob = new Blob([data.buffer], { type: mime });
+        state.outputName = outputName;
+
+        setProgress(100, 'Done!');
+        const toolNames = [...tools].join(', ');
+        showResult(
+          'Processing complete',
+          `Applied: ${toolNames} — ${formatBytes(state.outputBlob.size)}`
+        );
+
+        if (!ext.match(/^(mp3|wav|aac|ogg)$/)) {
+          dom.videoPlayer.src = URL.createObjectURL(state.outputBlob);
+          dom.switchOutput.classList.add('active');
+          dom.switchInput.classList.remove('active');
+          state.showingOutput = true;
+        }
+
+        dom.btnDownload.classList.add('visible');
+        try { await ffmpeg.deleteFile(inputName); } catch (_) {}
+        try { await ffmpeg.deleteFile(outputName); } catch (_) {}
+
+      } catch (err) {
+        console.error('Processing error:', err);
+        showResult('Processing failed', err.message);
+        dom.resultInfo.style.borderColor = 'rgba(220,74,74,0.3)';
+        dom.resultInfo.style.background = 'rgba(220,74,74,0.08)';
+        dom.resultText.style.color = 'var(--error)';
+      }
+
+      state.processing = false;
+      dom.btnProcess.classList.remove('processing');
+      dom.btnProcess.textContent = 'Process';
+      dom.btnProcess.disabled = false;
+      setTimeout(hideProgress, 2000);
+    }
+
+    // ----- Download -----
+    function setupDownload() {
+      dom.btnDownload.addEventListener('click', () => {
+        if (!state.outputBlob) return;
+        const url = URL.createObjectURL(state.outputBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = state.outputName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    // ----- Helpers -----
+    function formatTime(seconds) {
+      if (isNaN(seconds) || !isFinite(seconds)) return '0:00.00';
+      const m = Math.floor(seconds / 60);
+      const s = Math.floor(seconds % 60);
+      const ms = Math.floor((seconds % 1) * 100);
+      return `${m}:${String(s).padStart(2, '0')}.${String(ms).padStart(2, '0')}`;
+    }
+
+    function toFFmpegTime(str) {
+      // Convert m:ss.ff to HH:MM:SS.ff
+      const clean = str.trim();
+      const parts = clean.split(':');
+      if (parts.length === 1) {
+        const secs = parseFloat(parts[0]);
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = (secs % 60).toFixed(2);
+        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${s.padStart(5,'0')}`;
+      }
+      if (parts.length === 2) {
+        const m = parseInt(parts[0]);
+        const s = parseFloat(parts[1]);
+        const totalS = m * 60 + s;
+        const h = Math.floor(totalS / 3600);
+        const rm = Math.floor((totalS % 3600) / 60);
+        const rs = (totalS % 60).toFixed(2);
+        return `${String(h).padStart(2,'0')}:${String(rm).padStart(2,'0')}:${rs.padStart(5,'0')}`;
+      }
+      // Already HH:MM:SS format
+      return clean;
+    }
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(1) + ' ' + sizes[i];
+    }
+
+    function buildAtempoChain(speed) {
+      // atempo supports 0.5 to 2.0
+      if (speed >= 0.5 && speed <= 2.0) return `atempo=${speed}`;
+      let filters = [];
+      let remaining = speed;
+      if (speed > 2.0) {
+        while (remaining > 2.0) {
+          filters.push('atempo=2.0');
+          remaining /= 2.0;
+        }
+        filters.push(`atempo=${remaining.toFixed(4)}`);
+      } else {
+        while (remaining < 0.5) {
+          filters.push('atempo=0.5');
+          remaining /= 0.5;
+        }
+        filters.push(`atempo=${remaining.toFixed(4)}`);
+      }
+      return filters.join(',');
+    }
+
+    // ----- Process Button -----
+    function setupProcess() {
+      dom.btnProcess.addEventListener('click', processVideo);
+    }
+
+    // ----- Boot -----
+    function boot() {
+      setupUpload();
+      setupToolNav();
+      setupRadioGroups();
+      setupCheckboxes();
+      setupSpeedSlider();
+      setupVideoSwitch();
+      setupLog();
+      setupProcess();
+      setupDownload();
+      initFFmpeg();
+    }
+
+    boot();
+  </script>
+</body>
+</html>
